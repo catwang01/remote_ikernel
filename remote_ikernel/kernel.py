@@ -137,8 +137,8 @@ def check_password(connection):
             # Nothing more to read from the output
             return
 
-        re_passphrase = re.search(b"Enter passphrase .*:", text)
-        re_password = re.search(b".*@.* password:", text)
+        re_passphrase = re.search(b"Enter passphrase .*:", text, re.IGNORECASE)
+        re_password = re.search(b".*@.* password:", text, re.IGNORECASE)
         if re_passphrase:
             passphrase = get_password(re_passphrase.group())
             connection.sendline(passphrase)
