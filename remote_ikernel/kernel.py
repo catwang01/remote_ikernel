@@ -16,11 +16,17 @@ import re
 import subprocess
 import time
 import uuid
-
-import pexpect
+import sys
 
 try:
-    from pexpect import spawn as pexpect_spawn
+    if "--win" in sys.argv:
+        from pexpect.popen_spawn import PopenSpawn
+        class pexpect_spawn(PopenSpawn):
+            def isalive(self):
+                return self.proc.poll() is None
+    else:
+        from pexpect import spawn as pexpect_spawn
+
 except ImportError:
     from pexpect.popen_spawn import PopenSpawn
 
@@ -199,6 +205,7 @@ class RemoteIKernel(object):
         verbose=False,
         tunnel_hosts=None,
         launch_cmd=None,
+        win=False
     ):
         """
         Initialise a kernel on a remote machine and start tunnels.
@@ -231,6 +238,7 @@ class RemoteIKernel(object):
         self.cwd = os.getcwd()  # Launch directory may be needed if no workdir
         # Assign the parent uuid, or generate a new one
         self.uuid = extract_uuid(connection_info) or uuid.uuid4()
+        self.win = win
 
         # Initiate an ssh tunnel through any tunnel hosts
         # this will start a pexpect, so we must check if
@@ -469,9 +477,12 @@ class RemoteIKernel(object):
 
         # Create a temporary file to store a copy of the connection information
         # Delete the file if it already exists
-        conn.sendline("rm -f {0}".format(kernel_name))
+        self._remove_kernel_file(kernel_name)
         file_contents = json.dumps(self.connection_info)
-        conn.sendline("echo '{0}' > {1}".format(file_contents, kernel_name))
+        if self.win:
+            conn.sendline('echo \'{0}\' | Out-File -Encoding ASCII {1}'.format(file_contents, kernel_name))
+        else:
+            conn.sendline("echo '{0}' > {1}".format(file_contents, kernel_name))
 
         # Is this the best place for a pre-command? I guess people will just
         # have to deal with it. Pass it on as is.
@@ -490,11 +501,17 @@ class RemoteIKernel(object):
         # transient file for once the process stops. Trying to do this
         # whilst simultaneously starting the kernel ended up deleting
         # the file before it was read.
-        conn.sendline("rm -f {0}".format(kernel_name))
+        self._remove_kernel_file(conn, kernel_name)
         conn.sendline("exit")
 
         # Could check this for errors?
         conn.expect("exit")
+
+    def _remove_kernel_file(self, conn, kernel_name):
+        if self.win:
+            conn.sendline("rm -force {0}".format(kernel_name))
+        else:
+            conn.sendline("rm -f {0}".format(kernel_name))
 
     def tunnel_connection(self):
         """
@@ -707,6 +724,7 @@ def start_remote_kernel():
         "Use the '%(prog)s manage' subcommand for managing "
         "kernels.".format(__version__),
     )
+    parser.add_argument("--win", action="store_true", default=False, help="Windows Platform Support, SSH only")
     args = parser.parse_args()
 
     kernel = RemoteIKernel(
@@ -722,5 +740,6 @@ def start_remote_kernel():
         verbose=args.verbose,
         tunnel_hosts=args.tunnel_hosts,
         launch_cmd=args.launch_cmd,
+        win=args.win
     )
     kernel.keep_alive()
